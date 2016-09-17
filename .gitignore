@@ -27,12 +27,12 @@
 # Emacs
 # -*- mode: gitignore; -*-
 *~
-\#*\#
+*\#*\#
 /.emacs.desktop
 /.emacs.desktop.lock
 *.elc
 auto-save-list
 tramp
-.\#*
+*.\#*
 # projectiles files
 .projectile
