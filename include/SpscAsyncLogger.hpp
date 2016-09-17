@@ -16,23 +16,26 @@ class SpscAsyncLogger : public SafeAsyncLogger<FixedMessageLFQ<msgsize, (msgsize
     using parent = SafeAsyncLogger<FixedMessageLFQ<msgsize, (msgsize * maxmsgs)>, SafetyPolicy>;
 
    public:
+    static constexpr auto defaultDelim = ',';
+    static constexpr auto defaultEnd = '\n';
+
     template <typename... Args>
     SpscAsyncLogger(Args &&... args) : parent{std::forward<Args>(args)...}, lastTime{} {
         this->file << "0.0,[INFO], LoggerInit, MaxMsgs=" << maxmsgs << ", QSize=" << msgsize * maxmsgs << ", MsgSize=" << msgsize << '\n';
     }
     virtual ~SpscAsyncLogger() = default;
 
-    template <typename labellist, char end, char delim, typename... Args>
+    template <typename labellist, char end = defaultEnd, char delim = defaultDelim, typename... Args>
     __attribute__((always_inline)) inline void log(Args &&... args) {
         this->parent::template log<labellist, end, delim>(this->queue, std::forward<Args>(args)...);
     }
 
-    template <char end, char delim, typename... Args>
+    template <char end = defaultEnd, char delim = defaultDelim, typename... Args>
     __attribute__((always_inline)) inline void lograw(Args &&... args) {
         this->parent::template lograw<end, delim>(this->queue, std::forward<Args>(args)...);
     }
 
-    void write() override {
+    void write() {
         while (!this->queue.empty()) {
             const auto &msg = this->queue.front();
             const auto &info = msg->getInfo();
@@ -44,7 +47,7 @@ class SpscAsyncLogger : public SafeAsyncLogger<FixedMessageLFQ<msgsize, (msgsize
                     this->lastTime = *(static_cast<const decltype(lastTime) *>(msg->getTime()));
                     // Requires some kind of RTTI. like maybe taking address ot time::set to uniquely identify type and storing in msginfo.
                 } else {
-                    this->file << this->lastTime << info.delim;
+                    this->file << this->lastTime;
                 }
             }
             msg->write(this->file);

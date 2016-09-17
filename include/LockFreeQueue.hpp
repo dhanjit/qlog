@@ -9,15 +9,16 @@ namespace container {
 template <std::size_t size>
 class LockFreeQueue {
    private:
-    std::atomic<int> head;
+    std::atomic<int> head __attribute__((aligned(64)));
     // char head_padding[128];
-    std::atomic<int> tail;
+    std::atomic<int> tail __attribute__((aligned(64)));
     // char tail_padding[128];
-    char buffer[size];
+    char buffer[size] __attribute__((aligned(64)));
     // char *buffer = new char[size];
     // char buffer_padding[128];
 
-   protected:
+    // protected:
+   public:
     template <typename T>
     __attribute__((always_inline)) void doPush(const T &arg) {
         const T *storeAt = this->buffer + this->tail.load(std::memory_order_acquire);
@@ -27,6 +28,11 @@ class LockFreeQueue {
     template <typename T, typename... Args>
     __attribute__((always_inline)) void doEmplace(Args &&... args) {
         new (this->buffer + this->tail.load(std::memory_order_acquire)) T{std::forward<Args>(args)...};
+    }
+
+    template <typename T, typename... Args>
+    __attribute__((always_inline)) inline void doOffsetEmplace(std::size_t offset, Args &&... args) {
+        new (this->buffer + ((this->tail.load(std::memory_order_relaxed) + offset) & (size - 1))) T{std::forward<Args>(args)...};
     }
 
     __attribute__((always_inline)) void updateTail(std::size_t elemsize) { this->tail = ((this->tail + elemsize) & (size - 1)); }
@@ -63,7 +69,7 @@ class LockFreeQueue {
     // Exposed mostly for debugging. Shouldn't be required elsewhere.
     int getHead(std::memory_order mo = std::memory_order_relaxed) const { return this->head.load(mo); }
     int getTail(std::memory_order mo = std::memory_order_relaxed) const { return this->tail.load(mo); }
-};
+};    // __attribute__((aligned (64)));
 }
 }
 

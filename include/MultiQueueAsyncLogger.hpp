@@ -48,8 +48,8 @@ struct QueueList {
     using queue_t = FixedMessageLFQ<msgsize, (msgsize * maxmsgs)>;
     std::array<queue_t, count> list;
     QueueList() {}
-    queue_t &operator[](int i) { return list[i]; };
-    const queue_t &operator[](int i) const { return list[i]; };
+    queue_t &operator[](std::size_t i) { return list[i]; };
+    const queue_t &operator[](std::size_t i) const { return list[i]; };
 };
 
 template <std::size_t loggercnt, std::size_t msgsize, std::size_t maxmsgs, typename SafetyPolicy = safetypolicy::BackupLog<FstreamSyncLogger>>
@@ -62,7 +62,7 @@ class MultiQueueAsyncLogger : public SafeAsyncLogger<QueueList<loggercnt, msgsiz
     struct MsgToWrite {
         const Message *msg;
         timestamp::MicroSecondTime tm;
-        int qid;    // qid is probably not required. This is deducible from the queue. Not done for now, due to complexity.
+        std::size_t qid;    // qid is probably not required. This is deducible from the queue. Not done for now, due to complexity.
     };
 
     using time_t = decltype(MsgToWrite::tm);
@@ -73,6 +73,8 @@ class MultiQueueAsyncLogger : public SafeAsyncLogger<QueueList<loggercnt, msgsiz
     using parent = SafeAsyncLogger<QueueList<loggercnt, msgsize, maxmsgs>, SafetyPolicy>;
 
    public:
+    static constexpr auto defaultDelim = ',';
+    static constexpr auto defaultEnd = '\n';
     // Rant
     // Why on earth does lastTime{} <-- cause warning in gcc4.8 ?? This makes totally no sense.
     // /Rant
@@ -84,21 +86,23 @@ class MultiQueueAsyncLogger : public SafeAsyncLogger<QueueList<loggercnt, msgsiz
     }
     virtual ~MultiQueueAsyncLogger() = default;
 
-    template <typename labellist, char end, char delim, typename qid, typename... Args>
+    template <typename labellist, typename qid, char end = defaultEnd, char delim = defaultDelim, typename... Args>
     __attribute__((always_inline)) inline void log(Args &&... args) {
+        static_assert(qid::value < loggercnt, "Invalid QId");
         this->parent::template log<labellist, end, delim>(this->queue[qid::value], std::forward<Args>(args)...);
     }
 
-    template <char end, char delim, typename qid, typename... Args>
+    template <typename qid, char end = defaultEnd, char delim = defaultDelim, typename... Args>
     __attribute__((always_inline)) inline void lograw(Args &&... args) {
+        static_assert(qid::value < loggercnt, "Invalid QId");
         this->parent::template lograw<end, delim>(this->queue[qid::value], std::forward<Args>(args)...);
     }
 
-    void write() override {
+    void write() {
         // This can be vastly improved.
-        for (int i = 0; i < loggercnt; i++) {
+        for (std::size_t i = 0; i < loggercnt; i++) {
             auto &q = this->queue[i];
-            int offset = 0;
+            std::size_t offset = 0;
             const auto fillsize = q.fillSize();
             while (offset < fillsize) {
                 const auto &msg = q.front(offset);
@@ -130,7 +134,7 @@ class MultiQueueAsyncLogger : public SafeAsyncLogger<QueueList<loggercnt, msgsiz
                     break;
                 } else {
                     if (cinfo.isTimed) {
-                        this->file << msg.tm << cinfo.delim;
+                        this->file << msg.tm;
                     }
                     cmsg->write(this->file);
                     this->queue[msg.qid].pop();

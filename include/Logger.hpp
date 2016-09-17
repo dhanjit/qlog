@@ -68,6 +68,7 @@ struct FormattedValue<T> {
 template <typename T, int fixed_precision>
 struct FormattedValue<T, fixed_precision> : FormattedValue<T> {
     static_assert(std::is_floating_point<typename FormattedValue<T>::value_type>::value, "This specialization only for floating point types");
+    static_assert(0 <= fixed_precision && fixed_precision <= 9, "0 <= fixed_precision <= 9");
 
     using printfformat = typename stringct::ConcatStringCT<stringct::StringCT<'%', '.', '0' + fixed_precision>,
                                                            typename stringct::FormatSpecifierCT<typename FormattedValue<T>::value_type>::type>::type;
@@ -86,6 +87,7 @@ struct FormattedValue<T, fixed_precision> : FormattedValue<T> {
 template <typename T, int padding, int width>
 struct FormattedValue<T, padding, width> : FormattedValue<T> {
     static_assert(std::is_integral<typename FormattedValue<T>::value_type>::value, "This specialization only for integral types");
+    static_assert(0 <= padding && padding <= 9, "0 <= padding <= 9");
 
     using printfformat = typename stringct::ConcatStringCT<stringct::StringCT<'%', '0' + padding, '0' + width>,
                                                            typename stringct::FormatSpecifierCT<typename FormattedValue<T>::value_type>::type>::type;
@@ -111,7 +113,12 @@ struct LoggerDefaults {
 template <LogFile logfile>
 class Logger;
 
-class AbstractLogger {};
+class AbstractLogger {
+   protected:
+    // override or keep empty;
+    void start(std::string &&name) {}
+    void stop() {}
+};
 
 template <>
 class Logger<LogFile::Stream> : public AbstractLogger {
@@ -160,35 +167,63 @@ class Logger<LogFile::Posix> : public AbstractLogger {
     FILE *getFile() { return file; }
 };
 
+// Optional Helper Class: LoggerManager.
+
 template <typename L>
-class LoggerManager : public L, public LoggerDefaults {
+class LoggerManager : public L {
    private:
     // pass
+
    protected:
     // pass
+
    public:
+    void start(std::string &&name) = delete;
+    void stop() = delete;
+
     template <typename... Args>
-    LoggerManager(Args &&... args) : L{std::forward<Args>(args)...} {}
-    operator L() { *return static_cast<L *>(this); }
+    LoggerManager(std::string &&name, Args &&... args) : L{std::forward<Args>(args)...} {
+        this->L::start(std::forward<std::string>(name));
+    }
+
+    ~LoggerManager() { this->L::stop(); }
+
+    // Should not be required.
+    // template <typename labellist, typename... identifiers, char end = L::defaultEnd, char delim = L::defaultDelim, typename... Args>
+    // __attribute__((always_inline)) inline void log(Args &&... args) {
+    //     this->L::template log<labellist, identifiers..., end, delim>(std::forward<Args>(args)...);
+    // }
+
+    // template <typename... identifiers, char end = L::defaultEnd, char delim = L::defaultDelim, typename... Args>
+    // __attribute__((always_inline)) inline void lograw(Args &&... args) {
+    //     this->L::template lograw<indentifiers..., end, delim>(std::forward<Args>(args)...);
+    // }
 };
 
 template <typename L>
 class PerfLoggerManager : public LoggerManager<L> {
+   private:
+    using parent = LoggerManager<L>;
+
    public:
-    template <typename labellist, char end = defaultEnd, char delim = defaultDelim, typename... Args>
+    template <typename... Args>
+    PerfLoggerManager(Args &&... args) : parent{std::forward<Args>(args)...} {}
+    ~PerfLoggerManager() = default;
+
+    template <typename labellist, typename... identifiers, char end = L::defaultEnd, char delim = L::defaultDelim, typename... Args>
     __attribute__((always_inline)) inline void log(Args &&... args) {
         common::timestamp::NanoSecondTime<> t1{};
-        this->L::template log<delim, delim>(std::forward<Args>(args)...);
+        this->L::template log<labellist, identifiers..., delim, delim>(std::forward<Args>(args)...);
         common::timestamp::NanoSecondTime<> t2{};
-        this->L::template lograw<end, delim>("LP", t2 - t1);
+        this->L::template lograw<identifiers..., end, delim>("LP", t2 - t1);
     }
 
-    template <typename labellist, char end = defaultEnd, char delim = defaultDelim, typename... Args>
+    template <typename... identifiers, char end = L::defaultEnd, char delim = L::defaultDelim, typename... Args>
     __attribute__((always_inline)) inline void lograw(Args &&... args) {
         common::timestamp::NanoSecondTime<> t1{};
-        this->L::template lograw<delim, delim>(std::forward<Args>(args)...);
+        this->L::template lograw<identifiers..., delim, delim>(std::forward<Args>(args)...);
         common::timestamp::NanoSecondTime<> t2{};
-        this->L::template lograw<end, delim>("LP", t2 - t1);
+        this->L::template lograw<identifiers..., end, delim>("LP", t2 - t1);
     }
 };
 

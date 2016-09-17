@@ -87,8 +87,9 @@ class SafeAsyncLogger<queue_t, safetypolicy::BackupLog<L>> : public AsyncLogger<
             // Do something here before backing up??
             // Ideally error msg to be added at the end of args. Because scripts would work on csv columns of fields.
             // Extra field may not hurt but shifted fields would hurt badly
-            this->backupLogger.log<labellist, end, delim>(std::forward<Args>(args)..., "[ALOG_ERR]", "Buffer Overflow",
-                                                          parent::template getRequiredSize<Q::msgSize(), labellist, Args...>(), q.fillSize());
+            this->backupLogger.template log<labellist, end, delim>(std::forward<Args>(args)..., "[ALOG_ERR]", "Buffer Overflow",
+                                                                   parent::template getRequiredSize<Q::msgSize(), labellist, end, delim, Args...>(),
+                                                                   q.fillSize());
         }
     }
 
@@ -101,8 +102,9 @@ class SafeAsyncLogger<queue_t, safetypolicy::BackupLog<L>> : public AsyncLogger<
             // Hence now handle overflow.
             // Can't make assumptions about what is going to be logged here.
             // The most I can do is provide own timestamp with a identifier sayin it's a raw message.
-            this->backupLogger.lograw<end, delim>(timestamp::MicroSecondTime{}, "RAW", std::forward<Args>(args)..., "[ALOG_ERR]", "Buffer Overflow",
-                                                  parent::template getRequiredSize<Q::msgSize(), Args...>(), q.fillSize());
+            this->backupLogger.template lograw<end, delim>(timestamp::MicroSecondTime{}, "RAW", std::forward<Args>(args)..., "[ALOG_ERR]",
+                                                           "Buffer Overflow", parent::template getRequiredSize<Q::msgSize(), end, delim, Args...>(),
+                                                           q.fillSize());
         }
     }
 };

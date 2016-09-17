@@ -224,11 +224,11 @@ struct msgenqueuer<false, MsgList, MsgListIdx, ArgsStartIdx, seq<S...>> {
         // template <std::size_t I>
         // using std::forward<typename std::tuple_element<S,
         // std::tuple<Args>>::type>(std::get<S>(std::forward_as_tuple(args...)));
-        queue.template emplace<FmtMsg>(
-            std::forward<typename std::tuple_element<S, std::tuple<Args...>>::type>(std::get<S>(std::forward_as_tuple(args...)))...);
+        queue.template doOffsetEmplace<FmtMsg>(MsgListIdx * Q::msgSize(), std::forward<typename std::tuple_element<S, std::tuple<Args...>>::type>(
+                                                                              std::get<S>(std::forward_as_tuple(args...)))...);
         using nextEnqueuer = typename makeEnqueuer<MsgList, MsgListIdx + 1, ArgsStartIdx + FmtMsgArgCount>::type;
         nextEnqueuer::enqueue(queue, std::forward<Args>(args)...);
-    };
+    }
 };
 
 template <typename MsgList, std::size_t MsgListIdx, std::size_t ArgsStartIdx, typename Seq>
@@ -236,6 +236,7 @@ struct msgenqueuer<true, MsgList, MsgListIdx, ArgsStartIdx, Seq> {
     template <typename Q, typename... Args>
     __attribute__((always_inline)) inline static void enqueue(Q &queue, Args &&... args) {
         static_assert(sizeof...(Args) == ArgsStartIdx, "Argument Index incorrect");
+        queue.updateTail(std::tuple_size<MsgList>::value * Q::msgSize());
         // Do nothing.
     }
 };
@@ -334,8 +335,8 @@ class AsyncLogger : public Logger<LogFile::Stream> {
     // static constexpr auto end = '\n';
 
     std::atomic<bool> stopAsync;
-    unsigned int microsleep;
     std::thread asyncLogger;
+    unsigned int microsleep;
 
     queue_t queue;
 
@@ -344,17 +345,23 @@ class AsyncLogger : public Logger<LogFile::Stream> {
         return std::tuple_size<MsgList<labellist, msgsize, end, delim, Args...>>::value;
     }
 
+    template <std::size_t msgsize, char end, char delim, typename... Args>
+    static constexpr std::size_t getMsgCount() noexcept {
+        return std::tuple_size<RawMsgList<msgsize, end, delim, Args...>>::value;
+    }
+
     template <std::size_t msgsize, typename labellist, char end, char delim, typename... Args>
     static constexpr std::size_t getRequiredSize() noexcept {
         return getMsgCount<msgsize, labellist, end, delim, Args...>() * msgsize;
     }
 
-    AsyncLogger(std::string &&filename, std::string &&threadname, unsigned int microsleep_)
-        : parent{std::forward<std::string>(filename)},
-          stopAsync{false},
-          microsleep{microsleep_},
-          asyncLogger{&AsyncLogger::run, this, std::forward<std::string>(threadname)},
-          queue{} {}
+    template <std::size_t msgsize, char end, char delim, typename... Args>
+    static constexpr std::size_t getRequiredSize() noexcept {
+        return getMsgCount<msgsize, end, delim, Args...>() * msgsize;
+    }
+
+    AsyncLogger(std::string &&filename, unsigned int microsleep_)
+        : parent{std::forward<std::string>(filename)}, stopAsync{false}, microsleep{microsleep_}, queue{} {}
 
     template <typename labellist, char end, char delim, typename Q, typename... Args>
     __attribute__((always_inline)) inline void log(Q &q, Args &&... args) {
@@ -366,16 +373,15 @@ class AsyncLogger : public Logger<LogFile::Stream> {
         enqueuer<RawMsgList<Q::msgSize(), end, delim, Args...>>::enqueue(q, std::forward<Args>(args)...);
     }
 
-    virtual ~AsyncLogger() {
-        this->stopAsync = true;
-        this->asyncLogger.join();
-    }
+    virtual ~AsyncLogger() {}
 
     // Default run thread. Ideally only write function would change in derived
     // classes.
     void run(std::string &&threadname) {
-        pthread_setname_np(this->asyncLogger.native_handle(), threadname.c_str());
-        usleep(10000);
+        if (const auto errornum = pthread_setname_np(this->asyncLogger.native_handle(), threadname.c_str())) {
+            throw std::runtime_error("LoggerName Error: " + std::to_string(errornum));
+        }
+
         while (!this->stopAsync.load(std::memory_order_relaxed)) {
             this->write();
             this->flush();
@@ -383,6 +389,13 @@ class AsyncLogger : public Logger<LogFile::Stream> {
                 usleep(microsleep);
             }
         }
+    }
+
+    void start(std::string &&threadname) { asyncLogger = std::thread{&AsyncLogger::run, this, std::forward<std::string>(threadname)}; }
+
+    void stop() {
+        this->stopAsync = true;
+        this->asyncLogger.join();
     }
 
     // Extra vtable solely because of this being used in run.
