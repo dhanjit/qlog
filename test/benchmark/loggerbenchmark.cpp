@@ -1,19 +1,16 @@
 #include <benchmark/benchmark.h>
+#include <fstream>
 #include <iostream>
 #include "MultiQueueAsyncLogger.hpp"
 #include "SpscAsyncLogger.hpp"
+#include "TimeStamp.hpp"
 
 static constexpr auto maxmsgs = 64 * 8;
 static constexpr auto msgsize = 64;
 static constexpr auto repeat = 100000;
 
 void spscbench(benchmark::State& state) {
-    common::logger::LoggerManager<common::logger::SpscAsyncLogger<msgsize, maxmsgs, common::logger::safetypolicy::Overwrite>> logger{"alog", "a.log",
-                                                                                                                                     0u};
-    // common::logger::PerfLoggerManager<common::logger::SpscAsyncLogger<msgsize, maxmsgs, common::logger::safetypolicy::Overwrite>> logger{"alog",
-    //                                                                                                                                      "a.log",
-    //                                                                                                                                      0u};
-    // common::logger::SpscAsyncLogger<64, 1024*16> logger("a.log.backup", "a.log", "a.log", 100u);
+    common::logger::LoggerManager<common::logger::SpscAsyncLogger<msgsize, maxmsgs, common::logger::safetypolicy::Overwrite>> logMgr{"a.log", 0u};
     int a = 2, b = 5;
     double c = 5.0, d = 1.22;
     while (state.KeepRunning()) {
@@ -22,19 +19,14 @@ void spscbench(benchmark::State& state) {
         d += 0.33;
         c += 7.01;
         for (int i = 0; i < repeat; i++) {
-            logger.log<common::logger::label::LabelList<common::logger::level::INFO, SCT("TAG")>>(common::timestamp::MicroSecondTime{}, 1, a, b, c,
-                                                                                                  d);
+            using LL = common::logger::label::LabelList<common::logger::level::INFO, common::logger::level::INFO>;
+            logMgr.template log<LL>(common::timestamp::MicroSecondTime{}, 1, a, b, c, d);
         }
     }
 }
 
 void mqscbench(benchmark::State& state) {
-    common::logger::LoggerManager<common::logger::MultiQueueAsyncLogger<1, msgsize, maxmsgs, common::logger::safetypolicy::Overwrite>> logger{
-        "blog", "b.log", 0u};
-    // common::logger::PerfLoggerManager<common::logger::MultiQueueAsyncLogger<1, msgsize, maxmsgs, common::logger::safetypolicy::Overwrite>> logger{
-    //     "blog", "b.log", 0u};
-    // common::logger::MultiQueueAsyncLogger<1, msgsize, maxmsgs> logger("b.log.backup", "b.log", "b.log", 0u);
-    // usleep(1000);
+    common::logger::LoggerManager<common::logger::MultiQueueAsyncLogger<1, msgsize, maxmsgs, common::logger::safetypolicy::Overwrite>> logMgr{"b.log", 0u};
     int a = 2, b = 5;
     double c = 5.0, d = 1.22;
     while (state.KeepRunning()) {
@@ -43,14 +35,14 @@ void mqscbench(benchmark::State& state) {
         d += 0.33;
         c += 7.01;
         for (int i = 0; i < repeat; i++) {
-            logger.log<common::logger::label::LabelList<common::logger::level::INFO, SCT("TAG")>, common::logger::QId<0>>(
-                common::timestamp::MicroSecondTime{}, 1, a, b, c, d);
+            using LL = common::logger::label::LabelList<common::logger::level::INFO, common::logger::level::INFO>;
+            using Q0 = common::logger::QId<0>;
+            logMgr.template log<LL, Q0>(common::timestamp::MicroSecondTime{}, 1, a, b, c, d);
         }
     }
 }
 
 void copybench(benchmark::State& state) {
-    // common::timestamp::MicroSecondTime x{};
     std::ofstream os{"dummy.log", std::ios::out | std::ios::app};
     std::atomic<int> head;
     std::atomic<int> tail;
@@ -70,11 +62,13 @@ void copybench(benchmark::State& state) {
         d += 0.33;
         c += 7.01;
         for (int i = 0; i < 100000; i++) {
+            // Commented out due to compilation error with SCT("TAG") in template args
+            /*
             new (buf + tail.load(std::memory_order_acquire))
-                common::logger::TimedFormattedMessage<',', '\n', common::logger::label::LabelList<common::logger::level::INFO, SCT("TAG")>,
-                                                      common::timestamp::MicroSecondTime, int, int&, int&, double&, double&>{
-                    common::timestamp::MicroSecondTime{}, 1, a, b, c, d};
+                common::logger::TimedFormattedMessage<',', '\n', common::logger::label::LabelList<common::logger::level::INFO, SCT("TAG")>, common::timestamp::MicroSecondTime, int, int&, int&,
+                                                      double&, double&>{common::timestamp::MicroSecondTime{}, 1, a, b, c, d};
             tail = ((tail + msgsize) & (msgsize * maxmsgs - 1));
+            */
         }
     }
 }

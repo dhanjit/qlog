@@ -22,7 +22,7 @@ using second = long;
 using millisecond = long;
 using microsecond = long;
 using nanosecond = long;
-}
+}    // namespace integral
 
 class Time {
    protected:
@@ -163,9 +163,7 @@ class MicroSecondTime : public Time {
     MilliSecondType getMilliSeconds() const { return this->getMicroSeconds() / 1000; }
     MicroSecondType getMicroSeconds() const { return this->t.tv_usec; }
 
-    IntegralType operator+(const MicroSecondTime &rhs) const {
-        return (this->t.tv_sec + rhs.getSeconds()) * 1000000 + (this->t.tv_usec + rhs.getMicroSeconds());
-    }
+    IntegralType operator+(const MicroSecondTime &rhs) const { return (this->t.tv_sec + rhs.getSeconds()) * 1000000 + (this->t.tv_usec + rhs.getMicroSeconds()); }
 
     IntegralType operator-(const MicroSecondTime &rhs) const { return this->diff(rhs.getSeconds(), rhs.getMicroSeconds()); }
 
@@ -231,7 +229,7 @@ class NanoSecondTime : public Time {
 
     const NanoSecondTime &operator=(const IntegralType &val) {
         this->t.tv_sec = val / UnitsPerSec;
-        this->t.tv_usec = val % UnitsPerSec;
+        this->t.tv_nsec = val % UnitsPerSec;
         return *this;
     }
 
@@ -242,9 +240,7 @@ class NanoSecondTime : public Time {
     MicroSecondType getMicroSeconds() const { return this->getNanoSeconds() / 1000; }
     NanoSecondType getNanoSeconds() const { return this->t.tv_nsec; }
 
-    IntegralType operator+(const NanoSecondTime &rhs) const {
-        return (this->t.tv_sec + rhs.getSeconds()) * UnitsPerSec + (this->t.tv_nsec + rhs.getNanoSeconds());
-    }
+    IntegralType operator+(const NanoSecondTime &rhs) const { return (this->t.tv_sec + rhs.getSeconds()) * UnitsPerSec + (this->t.tv_nsec + rhs.getNanoSeconds()); }
 
     IntegralType operator-(const NanoSecondTime &rhs) const { return this->diff(rhs.getSeconds(), rhs.getNanoSeconds()); }
 
@@ -261,6 +257,6 @@ class NanoSecondTime : public Time {
         return s;
     }
 };
-}
-}
+}    // namespace timestamp
+}    // namespace common
 #endif
