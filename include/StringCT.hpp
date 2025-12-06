@@ -2,6 +2,7 @@
 #define _STRINGCT_HPP_
 
 #include <algorithm>
+#include <concepts>
 #include <type_traits>
 #include <utility>
 
@@ -27,6 +28,12 @@ struct StringCT {
 template <char... chars>
 constexpr char StringCT<chars...>::str[sizeof...(chars) + 1];
 
+template <typename T>
+concept CompileTimeString = requires {
+    typename T::type;
+    requires std::convertible_to<decltype(T::str), const char *>;
+};
+
 template <FixedString S, typename Idx>
 struct StringLiteralToCTImpl;
 
@@ -50,7 +57,7 @@ struct ConcatStringCT;
 template <char... c1, char... c2>
 struct ConcatStringCT<StringCT<c1...>, StringCT<c2...>> : StringCT<c1..., c2...> {};
 
-template <typename S1, typename S2, typename S3, typename... Args>
+template <CompileTimeString S1, CompileTimeString S2, CompileTimeString S3, typename... Args>
 struct ConcatStringCT<S1, S2, S3, Args...> : ConcatStringCT<typename ConcatStringCT<S1, S2>::type, S3, Args...> {};
 
 template <typename>

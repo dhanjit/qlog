@@ -1,6 +1,7 @@
 #ifndef _LOGGER_HPP_
 #define _LOGGER_HPP_
 
+#include <concepts>
 #include <cstdint>
 #include <cstdio>
 #include <format>
@@ -31,9 +32,7 @@ static constexpr const std::size_t totalLogLevels = 5;
 }    // namespace level
 
 template <typename T>
-struct is_level {
-    static constexpr bool value = std::is_base_of<level::Level, typename std::decay<T>::type>::value;
-};
+concept LogLevel = std::derived_from<std::decay_t<T>, level::Level>;
 
 namespace label {
 template <typename... Args>
@@ -53,7 +52,7 @@ template <typename T, int...>
 struct FormattedValue;
 template <typename T>
 struct FormattedValue<T> {
-    using value_type = typename std::decay<T>::type;
+    using value_type = std::decay_t<T>;
 
     value_type value;
 
@@ -64,9 +63,8 @@ struct FormattedValue<T> {
     value_type &&toStringify() { return std::forward<value_type>(value); }
 };
 
-template <typename T, int fixed_precision>
+template <std::floating_point T, int fixed_precision>
 struct FormattedValue<T, fixed_precision> : FormattedValue<T> {
-    static_assert(std::is_floating_point<typename FormattedValue<T>::value_type>::value, "This specialization only for floating point types");
     static_assert(0 <= fixed_precision && fixed_precision <= 9, "0 <= fixed_precision <= 9");
 
     using printfformat = typename common::stringct::ConcatStringCT<common::stringct::StringCT<'%', '.', '0' + fixed_precision>,
@@ -80,9 +78,8 @@ struct FormattedValue<T, fixed_precision> : FormattedValue<T> {
     }
 };
 
-template <typename T, int padding, int width>
+template <std::integral T, int padding, int width>
 struct FormattedValue<T, padding, width> : FormattedValue<T> {
-    static_assert(std::is_integral<typename FormattedValue<T>::value_type>::value, "This specialization only for integral types");
     static_assert(0 <= padding && padding <= 9, "0 <= padding <= 9");
 
     using printfformat = typename common::stringct::ConcatStringCT<common::stringct::StringCT<'%', '0' + padding, '0' + width>,

@@ -5,6 +5,8 @@
 #include <memory>
 #include <new>
 
+#include <concepts>
+
 #ifdef __cpp_lib_hardware_interference_size
 using std::hardware_destructive_interference_size;
 #else
@@ -13,6 +15,7 @@ constexpr std::size_t hardware_destructive_interference_size = 64;
 
 namespace common {
 namespace container {
+
 template <std::size_t size>
 class LockFreeQueue {
    private:

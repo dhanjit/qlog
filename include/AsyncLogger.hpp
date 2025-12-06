@@ -2,12 +2,17 @@
 #define _ASYNCLOGGER_HPP_
 
 #include <atomic>
+#include <chrono>
+#include <concepts>
 #include <thread>
 #include "LockFreeQueue.hpp"
 #include "Logger.hpp"
 
 namespace common {
 namespace logger {
+
+template <typename T>
+concept TimeType = common::timestamp::is_time<T>::value;
 
 struct MessageInfo {
     char delim;
@@ -46,7 +51,7 @@ template <char delim, char end, typename... Args>
 class FormattedMessage : public Message {
    private:
     // Something.
-    using data_t = std::tuple<typename std::decay<Args>::type...>;
+    using data_t = std::tuple<std::decay_t<Args>...>;
     data_t data;
 
    public:
@@ -97,14 +102,12 @@ class TimedFormattedMessage<delim, end, labellist, void, Args...> : public Forma
 template <char delim, char end, typename labellist, typename T, typename... Args>
 class TimedFormattedMessage : public TimedFormattedMessage<delim, end, labellist, void, Args...> {
    private:
-    static_assert(common::timestamp::is_time<T>::value, "Time should be here.");
-
     using parent = TimedFormattedMessage<delim, end, labellist, void, Args...>;
-    using time_t = typename std::decay<T>::type;
+    using time_t = std::decay_t<T>;
     time_t tm;
 
    public:
-    __attribute__((always_inline)) TimedFormattedMessage(T &&tm_, Args &&...args) : parent{std::forward<Args>(args)...}, tm{std::forward<T>(tm_)} {}
+    __attribute__((always_inline)) TimedFormattedMessage(TimeType auto &&tm_, Args &&...args) : parent{std::forward<Args>(args)...}, tm{std::forward<decltype(tm_)>(tm_)} {}
     using argtuple = std::tuple<T, Args...>;
 
     void write(std::ostream &os) const override {
@@ -407,7 +410,7 @@ class AsyncLogger : public Logger<LogFile::Stream> {
             this->write();
             this->flush();
             if (microsleep > 0) {
-                usleep(microsleep);
+                std::this_thread::sleep_for(std::chrono::microseconds(microsleep));
             }
         }
         this->write();
