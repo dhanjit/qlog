@@ -9,20 +9,25 @@ An extremely quick templated logging framework focused on a specific use case of
 * Supports compile time strings. See `StringCT`
 
 ## Getting Started
-- Add the `include` folder in your include path.
-- Use `LoggerManager<>` to declare the appropriate logger. Check examples.
 
-### Prerequisities
-- gcc 4.8.3 or later.
-- google benchmark for running benchmark code.
+- Add the `include` folder in your include path.
+* Use `LoggerManager<>` to declare the appropriate logger. Check examples.
+
+### Prerequisites
+
+- C++20 compliant compiler (GCC 10+, Clang 10+, MSVC 19.29+).
+* Google Benchmark for running benchmark code.
 
 ```
 Give examples
 ```
+
 ## Running the tests
+
 [TODO]
 
 ### Break down into end to end tests
+
 ```
 Give an example [TODO]
 ```
@@ -49,5 +54,4 @@ See also the list of [contributors](https://github.com/your/project/contributors
 
 ## License
 
-[TODO] 
-
+[TODO]

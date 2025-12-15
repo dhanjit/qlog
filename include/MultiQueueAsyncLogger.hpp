@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "FstreamSyncLogger.hpp"
+#include "LockFreeQueue.hpp"
 #include "SafeAsyncLogger.hpp"
 
 namespace common {
@@ -15,33 +16,6 @@ template <std::size_t i>
 struct QId {
     static constexpr std::size_t value = i;
 };
-//    namespace qlisttool {
-//       template <std::size_t idx, std::size_t size, typename Q>
-//       struct empty {
-//          static bool is(Q& q) {
-//             if (q.get<idx>().empty()) return );
-//          }
-//       };
-//    }
-
-// template <typename, std::size_t...> class MultiFixedMessageLFQ;
-// template <typename... Qs> class MultiFixedMessageLFQ<std::tuple<Qs...>> {
-//     using qlist_t = std::tuple<Qs...>;
-//     qlist_t qlist;
-//     static constexpr std::size_t qcount = sizeof(Qs...);
-
-//     MultiFixedMessageLFQ() {}
-
-//     template <std::size_t qnum> std::tuple_element<qnum, qlist>::type &get() { return std::get<qnum>(this->qlist); }
-// };
-
-// template <typename... Qs, std::size_t msgsize, std::size_t maxmsgs, std::size_t... sz>
-// class MultiFixedMessageLFQ<std::tuple<Qs...>, msgsize,
-//                            maxmsgs> : MultiFixedMessageLFQ<std::tuple<Qs..., FixedMessageLFQ<msgsize, (msgsize *maxmsgs)>>, sz...> {};
-
-// This is actually intended to be a tuple instead of a vector/array.
-// The complicacies increase manyfold when the list of queues can be of different types.
-// To be done later, to include support for differently sized queues.
 
 template <std::size_t count, std::size_t msgsize, std::size_t maxmsgs>
 struct QueueList {
@@ -52,6 +26,12 @@ struct QueueList {
     const queue_t &operator[](std::size_t i) const { return list[i]; };
 };
 
+struct MQMsgToWrite {
+    const Message *pMsg;
+    common::timestamp::MicroSecondTime timestamp;
+    std::size_t qid;
+};
+
 template <std::size_t loggercnt, std::size_t msgsize, std::size_t maxmsgs, typename SafetyPolicy = safetypolicy::BackupLog<FstreamSyncLogger>>
 class MultiQueueAsyncLogger : public SafeAsyncLogger<QueueList<loggercnt, msgsize, maxmsgs>, SafetyPolicy> {
    private:
@@ -59,14 +39,8 @@ class MultiQueueAsyncLogger : public SafeAsyncLogger<QueueList<loggercnt, msgsiz
 
     using qlist_t = QueueList<loggercnt, msgsize, maxmsgs>;
 
-    struct MsgToWrite {
-        const Message *msg;
-        timestamp::MicroSecondTime tm;
-        std::size_t qid;    // qid is probably not required. This is deducible from the queue. Not done for now, due to complexity.
-    };
-
-    using time_t = decltype(MsgToWrite::tm);
-    std::vector<MsgToWrite> sortedmsgs;
+    using time_t = common::timestamp::MicroSecondTime;
+    std::vector<MQMsgToWrite> sortedmsgs;
     std::array<time_t, loggercnt> lastTime;
 
    protected:
@@ -75,79 +49,61 @@ class MultiQueueAsyncLogger : public SafeAsyncLogger<QueueList<loggercnt, msgsiz
    public:
     static constexpr auto defaultDelim = ',';
     static constexpr auto defaultEnd = '\n';
-    // Rant
-    // Why on earth does lastTime{} <-- cause warning in gcc4.8 ?? This makes totally no sense.
-    // /Rant
-    // Edit: This is apparently fixed in gcc5.1
+
     template <typename... Args>
-    MultiQueueAsyncLogger(Args &&... args) : parent{std::forward<Args>(args)...}, sortedmsgs{} {
-        this->file << "0.0,[INFO], LoggerInit, MaxMsgs=" << maxmsgs << ", QSize=" << msgsize * maxmsgs << ", MsgSize=" << msgsize
-                   << ", QCnt=" << loggercnt << '\n';
+    MultiQueueAsyncLogger(Args &&...args) : parent{std::forward<Args>(args)...}, sortedmsgs{} {
+        this->file << "0.0,[INFO], LoggerInit, MaxMsgs=" << maxmsgs << ", QSize=" << msgsize * maxmsgs << ", MsgSize=" << msgsize << ", QCnt=" << loggercnt << '\n';
     }
-    virtual ~MultiQueueAsyncLogger() = default;
+    virtual ~MultiQueueAsyncLogger() {
+        if (this->workerThread.joinable()) {
+            this->stop();
+        }
+    }
 
     template <typename labellist, typename qid, char end = defaultEnd, char delim = defaultDelim, typename... Args>
-    __attribute__((always_inline)) inline void log(Args &&... args) {
+    __attribute__((always_inline)) inline void log(Args &&...args) {
         static_assert(qid::value < loggercnt, "Invalid QId");
         this->parent::template log<labellist, end, delim>(this->queue[qid::value], std::forward<Args>(args)...);
     }
 
     template <typename qid, char end = defaultEnd, char delim = defaultDelim, typename... Args>
-    __attribute__((always_inline)) inline void lograw(Args &&... args) {
+    __attribute__((always_inline)) inline void lograw(Args &&...args) {
         static_assert(qid::value < loggercnt, "Invalid QId");
         this->parent::template lograw<end, delim>(this->queue[qid::value], std::forward<Args>(args)...);
     }
 
     void write() {
-        // This can be vastly improved.
-        for (std::size_t i = 0; i < loggercnt; i++) {
-            auto &q = this->queue[i];
-            std::size_t offset = 0;
-            const auto fillsize = q.fillSize();
-            while (offset < fillsize) {
-                const auto &msg = q.front(offset);
-                offset += msgsize;
-                const auto &info = msg->getInfo();
-                if (info.hasTime) {
-                    lastTime[i] = *static_cast<const time_t *>(msg->getTime());
-                    // sortedmsgs.emplace_back(&msg, lastTime[i], i);
-                    sortedmsgs.push_back(MsgToWrite{msg, lastTime[i], i});
-                } else if (offset == msgsize) {
-                    sortedmsgs.push_back(MsgToWrite{msg, lastTime[i], i});
-                }
-            }
+        this->sortedmsgs.clear();
+
+        if (this->sortedmsgs.empty()) {
+            return;
         }
 
-        std::sort(sortedmsgs.begin(), sortedmsgs.end(), [](const MsgToWrite &a, const MsgToWrite &b) { return a.tm < b.tm; });
+        std::sort(this->sortedmsgs.begin(), this->sortedmsgs.end(), [](const MQMsgToWrite &a, const MQMsgToWrite &b) -> bool { return a.timestamp < b.timestamp; });
 
-        for (auto &msg : sortedmsgs) {
-            const auto &info = msg.msg->getInfo();
-            if (info.isTimed && !info.hasTime) {
-                this->file << msg.tm;
+        for (auto &m : this->sortedmsgs) {
+            if (m.timestamp > this->lastTime[m.qid]) {
+                this->file << m.timestamp;
             }
-            msg.msg->write(this->file);
-            this->queue[msg.qid].pop();
-            while (!this->queue[msg.qid].empty()) {
-                const auto &cmsg = this->queue[msg.qid].front();
+            m.pMsg->write(this->file);
+            this->queue[m.qid].pop();
+            while (!this->queue[m.qid].empty()) {
+                const auto *cmsg = static_cast<const Message *>(this->queue[m.qid].front());
                 const auto &cinfo = cmsg->getInfo();
                 if (cinfo.isTimed && cinfo.hasTime) {
                     break;
                 } else {
                     if (cinfo.isTimed) {
-                        this->file << msg.tm;
+                        this->file << m.timestamp;
                     }
                     cmsg->write(this->file);
-                    this->queue[msg.qid].pop();
+                    this->queue[m.qid].pop();
                 }
             }
-            // Updating head everytime has a chance of everytime refilling the head-tail cacheline.
-            // But not updating head everytime might cause overflow.
         }
-
-        // std::cerr << "fin" << std::endl;
-        sortedmsgs.clear();
     }
 };
-}
-}
+
+}    // namespace logger
+}    // namespace common
 #endif

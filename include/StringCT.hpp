@@ -1,42 +1,63 @@
 #ifndef _STRINGCT_HPP_
 #define _STRINGCT_HPP_
 
-// The only macro used due to language limitation
-// CT("ABCD") will be equivalent to common::stringct::StringCT<'A','B','C','D'>
-// supports upto 17 characters
+#include <algorithm>
+#include <concepts>
+#include <type_traits>
+#include <utility>
 
 namespace common {
 namespace stringct {
+
+// C++20 CNTTP Helper
+template <std::size_t N>
+struct FixedString {
+    char buf[N]{};
+    constexpr FixedString(char const (&s)[N]) { std::copy_n(s, N, buf); }
+    constexpr char operator[](std::size_t i) const { return buf[i]; }
+    constexpr std::size_t size() const { return N - 1; }    // Exclude null terminator
+};
 
 template <char... chars>
 struct StringCT {
     using type = StringCT<chars...>;
     static constexpr char str[sizeof...(chars) + 1] = {chars..., '\0'};
-    StringCT() = delete;
+    // StringCT() = delete; // Allow default construction for usage in other templates if needed
 };
 
 template <char... chars>
 constexpr char StringCT<chars...>::str[sizeof...(chars) + 1];
 
-template <typename, char...>
-struct TrimmedStringCT;
-template <char... validchars, char c, char... chars>
-struct TrimmedStringCT<StringCT<validchars...>, c, chars...> : TrimmedStringCT<StringCT<validchars..., c>, chars...> {};
-template <char... validchars, char... chars>
-struct TrimmedStringCT<StringCT<validchars...>, '\0', chars...> : StringCT<validchars...> {};
+template <typename T>
+concept CompileTimeString = requires {
+    typename T::type;
+    requires std::convertible_to<decltype(T::str), const char *>;
+};
 
-#define SCT_GET_1(str, i) (i < sizeof(str) ? str[i] : '\0')
-#define SCT_GET_4(str, i) SCT_GET_1(str, i + 0), SCT_GET_1(str, i + 1), SCT_GET_1(str, i + 2), SCT_GET_1(str, i + 3)
-#define SCT_GET_16(str, i) SCT_GET_4(str, i + 0), SCT_GET_4(str, i + 4), SCT_GET_4(str, i + 8), SCT_GET_4(str, i + 12)
-#define SCT_GET_64(str, i) SCT_GET_16(str, i + 0), SCT_GET_16(str, i + 16), SCT_GET_16(str, i + 32), SCT_GET_16(str, i + 48)
-#define SCT_GET(str) SCT_GET_64(str, 0)
-#define SCT(str) common::stringct::TrimmedStringCT<common::stringct::StringCT<>, SCT_GET(str)>::type
+template <FixedString S, typename Idx>
+struct StringLiteralToCTImpl;
+
+template <FixedString S, std::size_t... I>
+struct StringLiteralToCTImpl<S, std::index_sequence<I...>> {
+    using type = StringCT<S[I]...>;
+};
+
+template <FixedString S>
+using StringLiteralToCT = typename StringLiteralToCTImpl<S, std::make_index_sequence<S.size()>>::type;
+
+// Macro replacement
+#define SCT(str) ::common::stringct::StringLiteralToCT<str>
+
+// Existing helpers (ConcatStringCT, FormatSpecifierCT, etc.) need to be preserved
+// as they operate on StringCT<char...>
 
 template <typename...>
 struct ConcatStringCT;
+
 template <char... c1, char... c2>
 struct ConcatStringCT<StringCT<c1...>, StringCT<c2...>> : StringCT<c1..., c2...> {};
-template <typename S1, typename S2, typename S3, typename... Args>
+
+template <CompileTimeString S1, CompileTimeString S2, CompileTimeString S3, typename... Args>
 struct ConcatStringCT<S1, S2, S3, Args...> : ConcatStringCT<typename ConcatStringCT<S1, S2>::type, S3, Args...> {};
 
 template <typename>
@@ -74,8 +95,7 @@ template <typename T>
 struct FormatStringCT<T> : ConcatStringCT<StringCT<'%'>, typename FormatSpecifierCT<T>::type> {};
 
 template <char delim, typename T, typename U, typename... Args>
-struct FormatStringCT<StringCT<delim>, T, U, Args...>
-    : ConcatStringCT<typename FormatStringCT<T>::type, StringCT<delim>, typename FormatStringCT<StringCT<delim>, U, Args...>::type> {};
+struct FormatStringCT<StringCT<delim>, T, U, Args...> : ConcatStringCT<typename FormatStringCT<T>::type, StringCT<delim>, typename FormatStringCT<StringCT<delim>, U, Args...>::type> {};
 template <char delim, typename T>
 struct FormatStringCT<StringCT<delim>, T> : FormatStringCT<T> {};
 
@@ -98,26 +118,24 @@ struct PrintfConvert<T, true, false> {
     using format = typename T::printfformat;
 
     // This return type should always be an rvalue reference
-    __attribute__((always_inline)) static value_type &&get(T &&t) { return std::forward<value_type>(t.toStringify()); }
+    static value_type convert(T &t) { return t.toStringify(); }
 };
 
 template <typename T>
-struct PrintfConvert<T, true, true> {
-    using value_type = decltype(std::declval<typename std::remove_pointer<T>::type>().toStringify());
-    using format = typename std::remove_pointer<T>::type::printfformat;
-    __attribute__((always_inline)) static const value_type get(const T &t) { return t->toStringify(); }
+struct PrintfConvert<T, false, true> {
+    using value_type = const char *;
+    using format = typename FormatSpecifierCT<typename std::decay<T>::type>::type;
+    static value_type convert(const T &t) { return t.c_str(); }
 };
 
-template <typename T, bool x>
-struct PrintfConvert<T, false, x> {
+template <typename T>
+struct PrintfConvert<T, false, false> {
     using value_type = T;
-    using format = typename FormatStringCT<value_type>::type;
-    // static format getT();
-    __attribute__((always_inline)) static const value_type &get(const T &t) { return t; }
+    using format = typename FormatSpecifierCT<typename std::decay<T>::type>::type;
+    static value_type convert(const T &t) { return t; }
 };
 
-template <typename T>
-struct PrintfConvert<T> : PrintfConvert<T, std::is_class<typename std::remove_pointer<T>::type>::value, std::is_pointer<T>::value> {};
-}
-}
+}    // namespace stringct
+}    // namespace common
+
 #endif
