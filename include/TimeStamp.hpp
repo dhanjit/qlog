@@ -231,7 +231,7 @@ class NanoSecondTime : public Time {
 
     const NanoSecondTime &operator=(const IntegralType &val) {
         this->t.tv_sec = val / UnitsPerSec;
-        this->t.tv_usec = val % UnitsPerSec;
+        this->t.tv_nsec = val % UnitsPerSec;
         return *this;
     }
 
