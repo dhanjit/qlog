@@ -27,6 +27,10 @@
 # Logs
 *.log
 
+# Benchmark executables
+test/benchmark/loggerbenchmark
+test/benchmark/cyclebenchmark
+
 # Emacs
 # -*- mode: gitignore; -*-
 *~
